@@ -10,6 +10,10 @@ commands:
     args:
       - name: event_id
         required: true
+    flags:
+      - long: --daemon
+        short: -d
+        help: Use daemon detached mode.
 
   - name: stop
     help: Stops all xboxdrv instances.
