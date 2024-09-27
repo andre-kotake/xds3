@@ -1,0 +1,17 @@
+---
+env: production
+source_dir: src
+config_path: commands.yml
+target_dir: bin
+lib_dir: lib
+strict: true
+
+tab_indent: false
+show_examples_on_error: true
+
+usage_colors:
+  caption: bold
+  command: green
+  arg: blue
+  flag: magenta
+  environment_variable: cyan

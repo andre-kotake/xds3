@@ -1,0 +1,15 @@
+---
+name: xds3
+help: Use DualShock 3 as a Xbox 360 joystick.
+version: 1.0.0
+examples: [xds3 start 20, xds3 stop]
+
+commands:
+  - name: start
+    help: Starts xboxdrv for connected DualShock 3 input event.
+    args:
+      - name: event_id
+        required: true
+
+  - name: stop
+    help: Stops all xboxdrv instances.
