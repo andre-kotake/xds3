@@ -12,7 +12,7 @@ version_command() {
 }
 
 xds3_usage() {
-  printf "xds3 - Use DualShock 3 as a Xbox 360 joystick.\n\n"
+  printf "xds3 - Use DualShock 3 as a Xbox 360 joystick with xboxdrv.\n\n"
 
   printf "%s\n" "$(bold "Usage:")"
   printf "  xds3 COMMAND\n"
@@ -21,7 +21,7 @@ xds3_usage() {
   echo
 
   printf "%s\n" "$(bold "Commands:")"
-  printf "  %s   Starts xboxdrv for connected DualShock 3 input event.\n" "$(green "start")"
+  printf "  %s   Starts xboxdrv for connected DualShock 3.\n" "$(green "start")"
   printf "  %s   Stops all xboxdrv instances.\n" "$(green "stop") "
   echo
 
@@ -44,15 +44,30 @@ xds3_usage() {
 }
 
 xds3_start_usage() {
-  printf "xds3 start - Starts xboxdrv for connected DualShock 3 input event.\n\n"
+  if [[ -n $long_usage ]]; then
+    printf "xds3 start\n\n"
+    printf "  Starts xboxdrv for connected DualShock 3.\n  \n  Requires either --event_id or --config.\n\n"
+  else
+    printf "xds3 start - Starts xboxdrv for connected DualShock 3.\n\n"
+  fi
 
   printf "%s\n" "$(bold "Usage:")"
-  printf "  xds3 start EVENT_ID [OPTIONS]\n"
+  printf "  xds3 start [OPTIONS]\n"
   printf "  xds3 start --help | -h\n"
   echo
 
   if [[ -n "$long_usage" ]]; then
     printf "%s\n" "$(bold "Options:")"
+
+    printf "  %s\n" "$(magenta "--event_id, -e EVENT_ID")"
+    printf "    The input event ID.\n"
+    printf "    %s\n" "Conflicts: --config"
+    echo
+
+    printf "  %s\n" "$(magenta "--config, -c CONFIG_FILE")"
+    printf "    Use configuration file.\n"
+    printf "    %s\n" "Conflicts: --event_id"
+    echo
 
     printf "  %s\n" "$(magenta "--daemon, -d")"
     printf "    Use daemon detached mode.\n"
@@ -60,12 +75,6 @@ xds3_start_usage() {
 
     printf "  %s\n" "$(magenta "--help, -h")"
     printf "    Show this help\n"
-    echo
-
-    printf "%s\n" "$(bold "Arguments:")"
-
-    printf "  %s\n" "$(blue "EVENT_ID")"
-    printf "\n"
     echo
 
   fi
@@ -151,55 +160,88 @@ magenta_underlined() { print_in_color "\e[4;35m" "$*"; }
 cyan_underlined() { print_in_color "\e[4;36m" "$*"; }
 
 get_battery_level() {
-  local event_id="$1"
-  local mac_address
-  local capacity
+	local event_id="$1"
+	local mac_address
+	local capacity
 
-  mac_address=$(
-    </proc/bus/input/devices awk -v handler="event${event_id}" \
-      '/H: Handlers=/{if ($0 ~ handler) print prev} {prev=$0}' \
-      | awk -F'=' '/U: Uniq=/{print $2}' | tr '[:upper:]' '[:lower:]'
-  )
-  capacity=$(cat "/sys/class/power_supply/sony_controller_battery_${mac_address}/capacity")
+	mac_address=$(
+		</proc/bus/input/devices awk -v handler="event${event_id}" \
+			'/H: Handlers=/{if ($0 ~ handler) print prev} {prev=$0}' |
+			awk -F'=' '/U: Uniq=/{print $2}' | tr '[:upper:]' '[:lower:]'
+	)
+	capacity=$(cat "/sys/class/power_supply/sony_controller_battery_${mac_address}/capacity")
 
-  echo "Battery: $(green "${capacity}%")"
+	echo "Battery: $(green "${capacity}%")"
 }
 
 kill_current_instance() {
-  set +e # dont exit on error
+	set +e # dont exit on error
 
-  if [[ -n "$(pgrep xboxdrv)" ]]; then
-    echo "Stopping current instance of $(blue "xboxdrv")..."
-    killall xboxdrv --wait
-    echo "Stopped $(blue "xboxdrv")"
-    echo
-  fi
+	if [[ -n "$(pgrep xboxdrv)" ]]; then
+		echo "Stopping current instance of $(blue "xboxdrv")..."
+		killall xboxdrv --wait
+		echo "Stopped $(blue "xboxdrv")"
+		echo
+	fi
 
-  set -e # exit on error again
+	set -e # exit on error again
+}
+
+validate_file_exists() {
+  [[ -z "$1" ]] && echo "must not be empty"
+  [[ -f "$1" ]] || echo "must be an existing file"
+}
+
+validate_integer() {
+  [[ "$1" =~ ^[0-9]+$ ]] || echo "must be an integer"
 }
 
 xds3_start_command() {
   # shellcheck disable=SC2154
 
-  # args
-  event_id=${args[event_id]}
+  # Args
+  event_id=${args[--event_id]:=0}
+  config_file=${args[--config]:=""}
   daemon=${args[--daemon]:=0}
+
+  if [[ "$event_id" -eq 0 && -z "$config_file" ]]; then
+    red_bold "The \"start\" command requires --event_id or --config."
+
+    # shellcheck disable=SC2034
+    long_usage=yes
+    xds3_start_usage
+
+    exit 1
+  fi
 
   # Kill the current running xboxdrv
   kill_current_instance
 
+  command=()
+
   # Build the xboxdrv command as an array
-  command=(
-    "--evdev" "/dev/input/event${event_id}"
-    "--evdev-keymap" "BTN_START=Start,BTN_MODE=Guide,BTN_SELECT=Back,BTN_SOUTH=A,BTN_EAST=B,BTN_WEST=X,BTN_NORTH=Y,BTN_TL=LB,BTN_TR=RB,BTN_TL2=LT,BTN_TR2=RT,BTN_THUMBL=TL,BTN_THUMBR=TR,BTN_DPAD_UP=DU,BTN_DPAD_DOWN=DD,BTN_DPAD_LEFT=DL,BTN_DPAD_RIGHT=DR"
-    "--evdev-absmap" "ABS_X=X1,ABS_Y=Y1,ABS_RX=X2,ABS_RY=Y2,ABS_Z=LT,ABS_RZ=RT"
-    "--axismap" "-Y1=Y1,-Y2=Y2"
-    "--calibration" "RT=0:127:255,LT=0:127:255"
-    "--mimic-xpad"
-    "--detach-kernel-driver"
-    "--quiet"
-    "--silent"
-  )
+  if [[ $event_id -gt 0 ]]; then
+    green "Starting xboxdrv for: $(blue /dev/input/event"$event_id")"
+    get_battery_level "$event_id"
+
+    command=(
+      "--evdev" "/dev/input/event${event_id}"
+      "--evdev-keymap" "BTN_START=Start,BTN_MODE=Guide,BTN_SELECT=Back,BTN_SOUTH=A,BTN_EAST=B,BTN_WEST=X,BTN_NORTH=Y,BTN_TL=LB,BTN_TR=RB,BTN_TL2=LT,BTN_TR2=RT,BTN_THUMBL=TL,BTN_THUMBR=TR,BTN_DPAD_UP=DU,BTN_DPAD_DOWN=DD,BTN_DPAD_LEFT=DL,BTN_DPAD_RIGHT=DR"
+      "--evdev-absmap" "ABS_X=X1,ABS_Y=Y1,ABS_RX=X2,ABS_RY=Y2,ABS_Z=LT,ABS_RZ=RT"
+      "--axismap" "-Y1=Y1,-Y2=Y2"
+      "--calibration" "RT=0:127:255,LT=0:127:255"
+      "--mimic-xpad"
+      "--detach-kernel-driver"
+      "--quiet"
+      "--silent"
+    )
+  fi
+
+  # Use the configuration file
+  if [[ -n "$config_file" ]]; then
+    green "Starting xboxdrv with configuration: $(blue "$config_file")"
+    command=("--config" "$config_file")
+  fi
 
   # Add --daemon and --detach conditionally
   if [[ $daemon -eq 1 ]]; then
@@ -209,8 +251,6 @@ xds3_start_command() {
     echo "Press Ctrl-C to quit."
   fi
 
-  green "Starting xboxdrv for: $(blue /dev/input/event"$event_id")"
-  get_battery_level "$event_id"
   xboxdrv "${command[@]}"
 
 }
@@ -317,6 +357,40 @@ xds3_start_parse_requirements() {
     key="$1"
     case "$key" in
 
+      --event_id | -e)
+
+        if [[ -n "${args['--config']:-}" ]]; then
+          printf "conflicting options: %s cannot be used with %s\n" "$key" "--config" >&2
+          exit 1
+        fi
+
+        if [[ -n ${2+x} ]]; then
+          args['--event_id']="$2"
+          shift
+          shift
+        else
+          printf "%s\n" "--event_id requires an argument: --event_id, -e EVENT_ID" >&2
+          exit 1
+        fi
+        ;;
+
+      --config | -c)
+
+        if [[ -n "${args['--event_id']:-}" ]]; then
+          printf "conflicting options: %s cannot be used with %s\n" "$key" "--event_id" >&2
+          exit 1
+        fi
+
+        if [[ -n ${2+x} ]]; then
+          args['--config']="$2"
+          shift
+          shift
+        else
+          printf "%s\n" "--config requires an argument: --config, -c CONFIG_FILE" >&2
+          exit 1
+        fi
+        ;;
+
       --daemon | -d)
 
         args['--daemon']=1
@@ -330,22 +404,21 @@ xds3_start_parse_requirements() {
 
       *)
 
-        if [[ -z ${args['event_id']+x} ]]; then
-          args['event_id']=$1
-          shift
-        else
-          printf "invalid argument: %s\n" "$key" >&2
-          exit 1
-        fi
+        printf "invalid argument: %s\n" "$key" >&2
+        exit 1
 
         ;;
 
     esac
   done
 
-  if [[ -z ${args['event_id']+x} ]]; then
-    printf "missing required argument: EVENT_ID\nusage: xds3 start EVENT_ID [OPTIONS]\n" >&2
+  if [[ -v args['--event_id'] && -n $(validate_integer "${args['--event_id']:-}") ]]; then
+    printf "validation error in %s:\n%s\n" "--event_id, -e EVENT_ID" "$(validate_integer "${args['--event_id']:-}")" >&2
+    exit 1
+  fi
 
+  if [[ -v args['--config'] && -n $(validate_file_exists "${args['--config']:-}") ]]; then
+    printf "validation error in %s:\n%s\n" "--config, -c CONFIG_FILE" "$(validate_file_exists "${args['--config']:-}")" >&2
     exit 1
   fi
 
